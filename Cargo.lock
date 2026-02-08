@@ -3477,6 +3477,7 @@ dependencies = [
 [[package]]
 name = "tern-book"
 version = "0.1.0"
+source = "git+https://github.com/azw413/TernReader#49784e5bf1ba03fb2a1fe714ec4d04a7b49d3e3c"
 dependencies = [
  "env_logger",
  "fontdue",
@@ -3491,6 +3492,7 @@ dependencies = [
 [[package]]
 name = "tern-epub"
 version = "0.1.0"
+source = "git+https://github.com/azw413/TernReader#49784e5bf1ba03fb2a1fe714ec4d04a7b49d3e3c"
 dependencies = [
  "log",
  "quick-xml",
@@ -3501,6 +3503,7 @@ dependencies = [
 [[package]]
 name = "tern-image"
 version = "0.1.0"
+source = "git+https://github.com/azw413/TernReader#49784e5bf1ba03fb2a1fe714ec4d04a7b49d3e3c"
 dependencies = [
  "anyhow",
  "image",
