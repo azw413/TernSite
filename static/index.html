@@ -18,9 +18,82 @@
   </header>
 
   <main class="grid">
+    <section class="card wide file-manager">
+      <div class="file-manager-header">
+        <div>
+          <h2>Device Files</h2>
+          <p class="muted">Browse, delete, and add converted files directly on your TernReader.</p>
+        </div>
+        <div class="file-manager-actions">
+          <button id="fm-connect-btn" type="button">Connect USB</button>
+          <button id="fm-refresh-btn" type="button" disabled>Refresh</button>
+          <button id="fm-new-btn" type="button" disabled>New Folder</button>
+          <button id="fm-add-btn" class="icon-btn" type="button" disabled>+</button>
+        </div>
+      </div>
+      <div id="fm-status" class="muted">Not connected.</div>
+      <div id="fm-breadcrumbs" class="breadcrumbs"></div>
+      <div class="file-table">
+        <div class="file-row file-header">
+          <div>Name</div>
+          <div>Size</div>
+          <div>Actions</div>
+        </div>
+        <div id="fm-list"></div>
+      </div>
+      <div id="fm-empty" class="muted empty-state">No files here yet.</div>
+      <details class="usb-log-wrap">
+        <summary>USB log</summary>
+        <pre id="usb-log" class="log"></pre>
+      </details>
+    </section>
+
     <section class="card wide">
-      <h2>Convert Files</h2>
-      <p>Drop a file to convert. Supports <code>.epub</code>, <code>.png</code>, <code>.jpg</code>, <code>.jpeg</code>.</p>
+      <h2>Flash Latest App Firmware</h2>
+      <p>Uses WebSerial. Supported in Chrome and Edge.</p>
+      <div class="flash-info">
+        <div>
+          <div class="label">Latest asset</div>
+          <div id="fw-name">Loading…</div>
+        </div>
+        <div>
+          <div class="label">Version</div>
+          <div id="fw-tag">—</div>
+        </div>
+        <div>
+          <div class="label">Size</div>
+          <div id="fw-size">—</div>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="connect-btn" type="button">Connect Device</button>
+        <button id="flash-btn" type="button" disabled>Flash App Image</button>
+        <button id="download-btn" type="button">Download App Image</button>
+      </div>
+      <div class="progress-wrap">
+        <div class="progress-track">
+          <div id="flash-progress" class="progress-bar" style="width: 0%"></div>
+        </div>
+        <div id="flash-percent" class="muted">0%</div>
+      </div>
+      <pre id="flash-log" class="log"></pre>
+    </section>
+
+  </main>
+
+  <footer>
+    <p>API: <code>/api/convert/image</code>, <code>/api/convert/book</code>, <code>/api/firmware/latest</code></p>
+    <p>GitHub: <a href="https://github.com/azw413/TernReader" target="_blank" rel="noreferrer">https://github.com/azw413/TernReader</a></p>
+  </footer>
+
+  <div id="convert-modal" class="modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>Convert & Upload</h2>
+        <button id="convert-close" class="icon-btn" type="button">X</button>
+      </div>
+      <p class="muted">Drop a file to convert. It will upload into the current directory.</p>
+      <div id="convert-target" class="muted upload-target"></div>
 
       <div id="drop-zone" class="drop-zone">
         <input id="file-input" type="file" accept=".epub,image/png,image/jpeg" />
@@ -101,44 +174,14 @@
         <button id="convert-btn" type="button">Convert</button>
         <span id="convert-status" class="muted"></span>
       </div>
-    </section>
-
-    <section class="card wide">
-      <h2>Flash Latest App Firmware</h2>
-      <p>Uses WebSerial. Supported in Chrome and Edge.</p>
-      <div class="flash-info">
-        <div>
-          <div class="label">Latest asset</div>
-          <div id="fw-name">Loading…</div>
-        </div>
-        <div>
-          <div class="label">Version</div>
-          <div id="fw-tag">—</div>
-        </div>
-        <div>
-          <div class="label">Size</div>
-          <div id="fw-size">—</div>
-        </div>
-      </div>
-      <div class="actions">
-        <button id="connect-btn" type="button">Connect Device</button>
-        <button id="flash-btn" type="button" disabled>Flash App Image</button>
-        <button id="download-btn" type="button">Download App Image</button>
-      </div>
-      <div class="progress-wrap">
+      <div class="progress-wrap upload-progress">
         <div class="progress-track">
-          <div id="flash-progress" class="progress-bar" style="width: 0%"></div>
+          <div id="upload-progress" class="progress-bar" style="width: 0%"></div>
         </div>
-        <div id="flash-percent" class="muted">0%</div>
+        <div id="upload-percent" class="muted">0%</div>
       </div>
-      <pre id="flash-log" class="log"></pre>
-    </section>
-  </main>
-
-  <footer>
-    <p>API: <code>/api/convert/image</code>, <code>/api/convert/book</code>, <code>/api/firmware/latest</code></p>
-    <p>GitHub: <a href="https://github.com/azw413/TernReader" target="_blank" rel="noreferrer">https://github.com/azw413/TernReader</a></p>
-  </footer>
+    </div>
+  </div>
 
   <script type="module" src="/app.js"></script>
 </body>

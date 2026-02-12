@@ -3,6 +3,12 @@ const fileInput = document.getElementById("file-input");
 const fileName = document.getElementById("file-name");
 const convertBtn = document.getElementById("convert-btn");
 const convertStatus = document.getElementById("convert-status");
+const convertModal = document.getElementById("convert-modal");
+const convertClose = document.getElementById("convert-close");
+const convertTarget = document.getElementById("convert-target");
+const uploadProgress = document.getElementById("upload-progress");
+const uploadPercent = document.getElementById("upload-percent");
+const uploadProgressWrap = document.querySelector(".upload-progress");
 const imageOptions = document.getElementById("image-options");
 const bookOptions = document.getElementById("book-options");
 const imageOutput = document.getElementById("image-output");
@@ -18,6 +24,16 @@ const flashLog = document.getElementById("flash-log");
 const flashProgress = document.getElementById("flash-progress");
 const flashPercent = document.getElementById("flash-percent");
 
+const usbConnectBtn = document.getElementById("fm-connect-btn");
+const usbRefreshBtn = document.getElementById("fm-refresh-btn");
+const usbNewBtn = document.getElementById("fm-new-btn");
+const usbAddBtn = document.getElementById("fm-add-btn");
+const fmStatus = document.getElementById("fm-status");
+const fmBreadcrumbs = document.getElementById("fm-breadcrumbs");
+const fmList = document.getElementById("fm-list");
+const fmEmpty = document.getElementById("fm-empty");
+const usbLog = document.getElementById("usb-log");
+
 let selectedFile = null;
 let connectedLoader = null;
 let esptoolModule = null;
@@ -26,15 +42,54 @@ let currentPort = null;
 let currentTransport = null;
 let flashing = false;
 
+let usbPort = null;
+let usbReader = null;
+let usbWriter = null;
+let usbBuffer = new Uint8Array(0);
+let usbReqId = 1;
+const pendingUsbFrames = [];
+const usbInbox = new Map();
+const usbStats = {
+  rxBytes: 0,
+  crcErrors: 0,
+  badMagic: 0,
+  badVersion: 0,
+};
+let usbConnected = false;
+let usbMaxPayload = 512;
+let currentPath = "/";
+
 function logFlash(message) {
   flashLog.textContent += `${message}\n`;
   flashLog.scrollTop = flashLog.scrollHeight;
+}
+
+function logUsb(message) {
+  const time = new Date().toLocaleTimeString();
+  usbLog.textContent += `[${time}] ${message}\n`;
+  usbLog.scrollTop = usbLog.scrollHeight;
 }
 
 function setProgress(percent) {
   const clamped = Math.max(0, Math.min(100, percent));
   flashProgress.style.width = `${clamped}%`;
   flashPercent.textContent = `${clamped.toFixed(1)}%`;
+}
+
+function setUploadProgress(percent) {
+  const clamped = Math.max(0, Math.min(100, percent));
+  uploadProgress.style.width = `${clamped}%`;
+  uploadPercent.textContent = `${Math.round(clamped)}%`;
+}
+
+function showUploadProgress() {
+  uploadProgressWrap.classList.add("visible");
+  setUploadProgress(0);
+}
+
+function hideUploadProgress() {
+  uploadProgressWrap.classList.remove("visible");
+  setUploadProgress(0);
 }
 
 function setFile(file) {
@@ -58,6 +113,96 @@ function setFile(file) {
   }
 }
 
+function formatSize(bytes) {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let size = bytes;
+  let idx = 0;
+  while (size >= 1024 && idx < units.length - 1) {
+    size /= 1024;
+    idx += 1;
+  }
+  return `${size.toFixed(size >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+function joinPath(base, name) {
+  if (base === "/") return `/${name}`;
+  return `${base.replace(/\/$/, "")}/${name}`;
+}
+
+function normalizePath(path) {
+  if (!path.startsWith("/")) return `/${path}`;
+  return path === "" ? "/" : path;
+}
+
+function setFileManagerStatus(text) {
+  fmStatus.textContent = text;
+}
+
+function renderBreadcrumbs(path) {
+  fmBreadcrumbs.textContent = "";
+  const parts = path.split("/").filter(Boolean);
+  const rootBtn = document.createElement("button");
+  rootBtn.textContent = "/";
+  rootBtn.addEventListener("click", () => listDirectory("/"));
+  fmBreadcrumbs.appendChild(rootBtn);
+  let current = "";
+  parts.forEach((part) => {
+    current += `/${part}`;
+    const btn = document.createElement("button");
+    btn.textContent = part;
+    btn.addEventListener("click", () => listDirectory(current));
+    fmBreadcrumbs.appendChild(btn);
+  });
+}
+
+function renderFileList(entries) {
+  fmList.textContent = "";
+  const hiddenNames = new Set(["TRCACHE", "TRRESUME", "TRRECENT", "TRBOOKS"]);
+  const filtered = entries.filter((entry) => {
+    if (entry.name.startsWith(".")) return false;
+    if (hiddenNames.has(entry.name)) return false;
+    return true;
+  });
+  if (filtered.length === 0) {
+    fmEmpty.style.display = "block";
+    return;
+  }
+  fmEmpty.style.display = "none";
+  filtered.forEach((entry) => {
+    const row = document.createElement("div");
+    row.className = "file-row";
+    const nameCell = document.createElement("div");
+    nameCell.className = "file-name";
+    const nameBtn = document.createElement("button");
+    nameBtn.textContent = entry.isDir ? `[DIR] ${entry.name}` : entry.name;
+    if (entry.isDir) {
+      nameBtn.addEventListener("click", () => listDirectory(joinPath(currentPath, entry.name)));
+    } else {
+      nameBtn.disabled = true;
+    }
+    nameCell.appendChild(nameBtn);
+
+    const sizeCell = document.createElement("div");
+    sizeCell.className = "file-meta";
+    sizeCell.textContent = entry.isDir ? "—" : formatSize(entry.size);
+
+    const actionsCell = document.createElement("div");
+    actionsCell.className = "file-actions";
+    if (!entry.isDir) {
+      const delBtn = document.createElement("button");
+      delBtn.textContent = "Delete";
+      delBtn.addEventListener("click", () => deleteEntry(entry));
+      actionsCell.appendChild(delBtn);
+    }
+
+    row.appendChild(nameCell);
+    row.appendChild(sizeCell);
+    row.appendChild(actionsCell);
+    fmList.appendChild(row);
+  });
+}
+
 function isImage(file) {
   const name = file.name.toLowerCase();
   return name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg");
@@ -71,6 +216,24 @@ function replaceExtension(filename, newExt) {
   const idx = filename.lastIndexOf(".");
   if (idx === -1) return filename + newExt;
   return filename.slice(0, idx) + newExt;
+}
+
+function toShortName(filename) {
+  const parts = filename.split(".");
+  const ext = parts.length > 1 ? parts.pop() : "";
+  const base = parts.join(".");
+  const clean = (str) => str.replace(/[^a-zA-Z0-9]/g, "_").toUpperCase();
+  const shortBase = clean(base).slice(0, 8) || "FILE";
+  const shortExt = clean(ext).slice(0, 3);
+  return shortExt ? `${shortBase}.${shortExt}` : shortBase;
+}
+
+function ensureShortName(filename) {
+  const short = toShortName(filename);
+  return {
+    name: short,
+    changed: short.toUpperCase() !== filename.toUpperCase(),
+  };
 }
 
 function uint8ToBinaryString(bytes) {
@@ -121,6 +284,7 @@ async function handleConvert() {
     : buildImageFormData(selectedFile);
 
   convertStatus.textContent = "Converting...";
+  hideUploadProgress();
   const response = await fetch(endpoint, {
     method: "POST",
     body: formData,
@@ -132,20 +296,43 @@ async function handleConvert() {
   }
 
   const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
   const defaultName = isEpub(selectedFile) ? "converted.trbk" : "converted.tri";
   const contentDisp = response.headers.get("Content-Disposition");
   const name = contentDisp && contentDisp.includes("filename=")
     ? contentDisp.split("filename=")[1]
     : defaultName;
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  convertStatus.textContent = "Done.";
+  if (usbConnected) {
+    const targetPath = joinPath(currentPath, name);
+    const short = ensureShortName(name);
+    const finalName = short.name;
+    const finalPath = joinPath(currentPath, finalName);
+    if (short.changed) {
+      convertStatus.textContent = `Device requires 8.3 names. Using ${finalName}.`;
+    }
+    convertStatus.textContent = `Uploading to ${finalPath} ...`;
+    showUploadProgress();
+    try {
+      await usbUploadBlob(finalPath, blob, (percent) => setUploadProgress(percent));
+      convertStatus.textContent = `Uploaded to ${finalPath}.`;
+      hideUploadProgress();
+      setFile(null);
+      fileInput.value = "";
+      await listDirectory(currentPath);
+    } catch (err) {
+      hideUploadProgress();
+      convertStatus.textContent = `Upload failed: ${err?.message || err}`;
+    }
+  } else {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    convertStatus.textContent = "Downloaded.";
+  }
 }
 
 function bindDropZone() {
@@ -331,6 +518,431 @@ async function flashFirmware() {
   }
 }
 
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) {
+    crc ^= bytes[i];
+    for (let j = 0; j < 8; j++) {
+      const mask = -(crc & 1);
+      crc = (crc >>> 1) ^ (0xedb88320 & mask);
+    }
+  }
+  return (~crc) >>> 0;
+}
+
+function writeU16(buf, value) {
+  buf.push(value & 0xff, (value >> 8) & 0xff);
+}
+
+function writeU32(buf, value) {
+  buf.push(value & 0xff, (value >> 8) & 0xff, (value >> 16) & 0xff, (value >> 24) & 0xff);
+}
+
+function encodeFrame(cmd, reqId, payload, flags = 0x01) {
+  const out = [];
+  writeU16(out, 0x5452);
+  out.push(0x01);
+  out.push(flags);
+  out.push(cmd);
+  writeU16(out, reqId);
+  writeU32(out, payload.length);
+  out.push(...payload);
+  const crc = crc32(Uint8Array.from(out));
+  writeU32(out, crc);
+  return Uint8Array.from(out);
+}
+
+function parseFrames() {
+  const frames = [];
+  const findNextMagic = (buf, start) => {
+    for (let i = start; i + 1 < buf.length; i++) {
+      if (buf[i] === 0x52 && buf[i + 1] === 0x54) {
+        return i;
+      }
+    }
+    return -1;
+  };
+  while (usbBuffer.length >= 15) {
+    const magic = usbBuffer[0] | (usbBuffer[1] << 8);
+    if (magic !== 0x5452) {
+      usbStats.badMagic += 1;
+      const next = findNextMagic(usbBuffer, 1);
+      if (next === -1) {
+        usbBuffer = new Uint8Array(0);
+      } else {
+        usbBuffer = usbBuffer.slice(next);
+      }
+      continue;
+    }
+    const version = usbBuffer[2];
+    if (version !== 0x01) {
+      usbStats.badVersion += 1;
+      const next = findNextMagic(usbBuffer, 1);
+      if (next === -1) {
+        usbBuffer = new Uint8Array(0);
+      } else {
+        usbBuffer = usbBuffer.slice(next);
+      }
+      continue;
+    }
+    const flags = usbBuffer[3];
+    const cmd = usbBuffer[4];
+    const reqId = usbBuffer[5] | (usbBuffer[6] << 8);
+    const len = usbBuffer[7] | (usbBuffer[8] << 8) | (usbBuffer[9] << 16) | (usbBuffer[10] << 24);
+    const total = 11 + len + 4;
+    if (usbBuffer.length < total) break;
+    const payload = usbBuffer.slice(11, 11 + len);
+    const crcStart = 11 + len;
+    const expectedCrc = usbBuffer[crcStart] | (usbBuffer[crcStart + 1] << 8) | (usbBuffer[crcStart + 2] << 16) | (usbBuffer[crcStart + 3] << 24);
+    const actualCrc = crc32(usbBuffer.slice(0, 11 + len));
+    const crcOk = expectedCrc === actualCrc;
+    if (!crcOk) {
+      usbStats.crcErrors += 1;
+      if (usbStats.crcErrors % 5 === 1) {
+        logUsb(`CRC mismatch (${usbStats.crcErrors})`);
+      }
+    }
+    usbBuffer = usbBuffer.slice(total);
+    frames.push({ flags, cmd, reqId, payload, crcOk });
+  }
+  return frames;
+}
+
+function decodeError(payload) {
+  if (payload.length < 4) return "unknown error";
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  const code = view.getUint16(0, true);
+  const len = view.getUint16(2, true);
+  const msgBytes = payload.slice(4, 4 + len);
+  const msg = new TextDecoder().decode(msgBytes);
+  return `code ${code}: ${msg}`;
+}
+
+function dispatchUsbFrame(frame) {
+  const isErr = (frame.flags & 0x02) !== 0;
+  const isResp = (frame.flags & 0x01) !== 0;
+  const flagText = `${isResp ? "RESP" : "REQ"}${isErr ? "|ERR" : ""}${frame.crcOk === false ? "|CRC" : ""}`;
+  logUsb(`RX ${flagText} cmd=0x${frame.cmd.toString(16)} req=${frame.reqId} len=${frame.payload.length}`);
+  if (isErr) {
+    logUsb(`ERR ${decodeError(frame.payload)}`);
+  }
+  let delivered = false;
+  for (let i = 0; i < pendingUsbFrames.length; i++) {
+    if (pendingUsbFrames[i](frame)) {
+      delivered = true;
+    }
+  }
+  if (!delivered) {
+    const queued = usbInbox.get(frame.reqId) || [];
+    queued.push(frame);
+    usbInbox.set(frame.reqId, queued);
+  }
+}
+
+async function usbReadLoop() {
+  while (usbReader) {
+    const { value, done } = await usbReader.read();
+    if (done) break;
+    if (value) {
+      usbStats.rxBytes += value.length;
+      const merged = new Uint8Array(usbBuffer.length + value.length);
+      merged.set(usbBuffer, 0);
+      merged.set(value, usbBuffer.length);
+      usbBuffer = merged;
+      parseFrames().forEach(dispatchUsbFrame);
+    }
+  }
+}
+
+async function usbSend(cmd, payload) {
+  if (!usbWriter) throw new Error("USB not connected");
+  const reqId = usbReqId++ & 0xffff;
+  const frame = encodeFrame(cmd, reqId, payload);
+  logUsb(`TX cmd=0x${cmd.toString(16)} req=${reqId} len=${payload.length}`);
+  await usbWriter.write(frame);
+  return reqId;
+}
+
+function encodePathPayload(path) {
+  const encoder = new TextEncoder();
+  const pathBytes = encoder.encode(path);
+  const payload = [];
+  writeU16(payload, pathBytes.length);
+  payload.push(...pathBytes);
+  return { payload, pathBytes };
+}
+
+async function usbWaitForResponse(reqId, timeoutMs = 2000) {
+  return new Promise((resolve, reject) => {
+    const handler = (frame) => {
+      if (frame.reqId !== reqId) return false;
+      const idx = pendingUsbFrames.indexOf(handler);
+      if (idx !== -1) pendingUsbFrames.splice(idx, 1);
+      resolve(frame);
+      return true;
+    };
+    pendingUsbFrames.push(handler);
+    const queued = usbInbox.get(reqId);
+    if (queued) {
+      usbInbox.delete(reqId);
+      queued.forEach((frame) => handler(frame));
+    }
+    setTimeout(() => {
+      const idx = pendingUsbFrames.indexOf(handler);
+      if (idx !== -1) pendingUsbFrames.splice(idx, 1);
+      reject(new Error("USB timeout"));
+    }, timeoutMs);
+  });
+}
+
+async function usbInfo() {
+  const reqId = await usbSend(0x02, []);
+  const frame = await usbWaitForResponse(reqId, 2000);
+  const view = new DataView(frame.payload.buffer, frame.payload.byteOffset, frame.payload.byteLength);
+  const maxPayload = view.getUint32(0, true);
+  usbMaxPayload = maxPayload || usbMaxPayload;
+  return usbMaxPayload;
+}
+
+async function usbList(path) {
+  const { payload } = encodePathPayload(path);
+  const reqId = await usbSend(0x10, payload);
+  return new Promise((resolve, reject) => {
+    let chunks = [];
+    const timeoutId = setTimeout(() => {
+      const idx = pendingUsbFrames.indexOf(handler);
+      if (idx !== -1) pendingUsbFrames.splice(idx, 1);
+      logUsb(`USB stats: rx=${usbStats.rxBytes} crc=${usbStats.crcErrors} magic=${usbStats.badMagic} ver=${usbStats.badVersion}`);
+      reject(new Error("LIST timeout"));
+    }, 5000);
+    const handler = (frame) => {
+      if (frame.reqId !== reqId) return false;
+      const idx = pendingUsbFrames.indexOf(handler);
+      if (idx !== -1 && (frame.flags & 0x02) !== 0) {
+        pendingUsbFrames.splice(idx, 1);
+      }
+      const isErr = (frame.flags & 0x02) !== 0;
+      if (isErr) {
+        clearTimeout(timeoutId);
+        reject(new Error(decodeError(frame.payload)));
+        return true;
+      }
+      chunks.push(frame.payload);
+      const isEof = (frame.flags & 0x04) !== 0 || (frame.flags & 0x08) === 0;
+      if (isEof) {
+        const idx = pendingUsbFrames.indexOf(handler);
+        if (idx !== -1) pendingUsbFrames.splice(idx, 1);
+        const total = chunks.reduce((sum, c) => sum + c.length, 0);
+        const out = new Uint8Array(total);
+        let offset = 0;
+        chunks.forEach((c) => {
+          out.set(c, offset);
+          offset += c.length;
+        });
+        clearTimeout(timeoutId);
+        resolve(out);
+      }
+      return true;
+    };
+    pendingUsbFrames.push(handler);
+    const queued = usbInbox.get(reqId);
+    if (queued) {
+      usbInbox.delete(reqId);
+      queued.forEach((frame) => handler(frame));
+    }
+  });
+}
+
+async function usbDelete(path) {
+  const { payload } = encodePathPayload(path);
+  const reqId = await usbSend(0x13, payload);
+  const frame = await usbWaitForResponse(reqId, 2000);
+  const isErr = (frame.flags & 0x02) !== 0;
+  if (isErr) {
+    throw new Error(decodeError(frame.payload));
+  }
+}
+
+async function usbMkdir(path) {
+  const { payload } = encodePathPayload(path);
+  const reqId = await usbSend(0x14, payload);
+  const frame = await usbWaitForResponse(reqId, 2000);
+  const isErr = (frame.flags & 0x02) !== 0;
+  if (isErr) {
+    throw new Error(decodeError(frame.payload));
+  }
+}
+
+async function usbWriteChunk(path, offset, data) {
+  const { payload } = encodePathPayload(path);
+  const offsetBytes = new Uint8Array(8);
+  const view = new DataView(offsetBytes.buffer);
+  view.setBigUint64(0, BigInt(offset), true);
+  const lenBytes = new Uint8Array(4);
+  new DataView(lenBytes.buffer).setUint32(0, data.length, true);
+  payload.push(...offsetBytes);
+  payload.push(...lenBytes);
+  payload.push(...data);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const reqId = await usbSend(0x12, payload);
+    const frame = await usbWaitForResponse(reqId, 4000);
+    if (frame.crcOk === false) {
+      continue;
+    }
+    const isErr = (frame.flags & 0x02) !== 0;
+    if (isErr) {
+      throw new Error(decodeError(frame.payload));
+    }
+    const respView = new DataView(frame.payload.buffer, frame.payload.byteOffset, frame.payload.byteLength);
+    return respView.getUint32(0, true);
+  }
+  throw new Error("Write CRC retry failed");
+}
+
+async function usbUploadBlob(path, blob, onProgress) {
+  const buffer = new Uint8Array(await blob.arrayBuffer());
+  const encoded = new TextEncoder().encode(path);
+  const overhead = 2 + encoded.length + 8 + 4;
+  const maxChunk = Math.max(256, usbMaxPayload - overhead);
+  if (maxChunk <= 0) {
+    throw new Error("USB payload too small");
+  }
+  let offset = 0;
+  while (offset < buffer.length) {
+    const chunk = buffer.slice(offset, offset + maxChunk);
+    const written = await usbWriteChunk(path, offset, chunk);
+    if (written === 0) {
+      throw new Error("Write failed");
+    }
+    offset += written;
+    if (onProgress) {
+      onProgress((offset / buffer.length) * 100);
+    }
+  }
+}
+
+async function waitForResponse(reqId, timeoutMs) {
+  return new Promise((resolve) => {
+    const handler = (frame) => {
+      if (frame.reqId !== reqId) return false;
+      const idx = pendingUsbFrames.indexOf(handler);
+      if (idx !== -1) pendingUsbFrames.splice(idx, 1);
+      resolve(true);
+      return true;
+    };
+    pendingUsbFrames.push(handler);
+    const queued = usbInbox.get(reqId);
+    if (queued) {
+      usbInbox.delete(reqId);
+      queued.forEach((frame) => handler(frame));
+    }
+    setTimeout(() => {
+      const idx = pendingUsbFrames.indexOf(handler);
+      if (idx !== -1) pendingUsbFrames.splice(idx, 1);
+      resolve(false);
+    }, timeoutMs);
+  });
+}
+
+async function connectUsb() {
+  if (!navigator.serial) {
+    logUsb("WebSerial not available.");
+    return;
+  }
+  await closeOpenPorts();
+  usbPort = await navigator.serial.requestPort();
+  await usbPort.open({ baudRate: 115200 });
+  usbWriter = usbPort.writable.getWriter();
+  usbReader = usbPort.readable.getReader();
+  usbBuffer = new Uint8Array(0);
+  logUsb("USB connected. Sending PING...");
+  usbReadLoop();
+  const pingReq = await usbSend(0x01, []);
+  const pingOk = await waitForResponse(pingReq, 2000);
+  if (!pingOk) {
+    logUsb("No PING response (is USB mode enabled on device?)");
+  }
+  usbConnected = true;
+  usbConnectBtn.textContent = "USB Connected";
+  usbRefreshBtn.disabled = false;
+  usbNewBtn.disabled = false;
+  usbAddBtn.disabled = false;
+  setFileManagerStatus("Connected. Fetching device info...");
+  try {
+    await usbInfo();
+    setFileManagerStatus(`Connected. Max payload ${usbMaxPayload} bytes.`);
+  } catch (err) {
+    setFileManagerStatus(`Connected. Info failed: ${err?.message || err}`);
+  }
+  await listDirectory(currentPath);
+}
+
+function parseListPayload(payload) {
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  let offset = 0;
+  const count = view.getUint16(offset, true);
+  offset += 2;
+  const entries = [];
+  for (let i = 0; i < count; i++) {
+    const kind = view.getUint8(offset); offset += 1;
+    const nameLen = view.getUint16(offset, true); offset += 2;
+    const nameBytes = payload.slice(offset, offset + nameLen);
+    offset += nameLen;
+    const size = Number(view.getBigUint64(offset, true)); offset += 8;
+    const name = new TextDecoder().decode(nameBytes);
+    entries.push({
+      name,
+      isDir: kind === 1,
+      size,
+    });
+  }
+  return entries;
+}
+
+async function listDirectory(path) {
+  try {
+    const normalized = normalizePath(path);
+    currentPath = normalized;
+    renderBreadcrumbs(currentPath);
+    setFileManagerStatus(`Listing ${currentPath} ...`);
+    logUsb(`Listing ${currentPath} ...`);
+    const payload = await usbList(currentPath);
+    const entries = parseListPayload(payload);
+    renderFileList(entries);
+    setFileManagerStatus(`Showing ${entries.length} entries in ${currentPath}.`);
+  } catch (err) {
+    setFileManagerStatus(`List failed: ${err?.message || err}`);
+    logUsb(`List failed: ${err?.message || err}`);
+  }
+}
+
+async function deleteEntry(entry) {
+  if (!confirm(`Delete ${entry.name}?`)) return;
+  try {
+    const path = joinPath(currentPath, entry.name);
+    setFileManagerStatus(`Deleting ${path} ...`);
+    await usbDelete(path);
+    await listDirectory(currentPath);
+  } catch (err) {
+    setFileManagerStatus(`Delete failed: ${err?.message || err}`);
+  }
+}
+
+async function createFolder() {
+  const name = prompt("Folder name:");
+  if (!name) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  const target = joinPath(currentPath, trimmed);
+  try {
+    setFileManagerStatus(`Creating ${target} ...`);
+    await usbMkdir(target);
+    await listDirectory(currentPath);
+  } catch (err) {
+    setFileManagerStatus(`Create failed: ${err?.message || err}`);
+  }
+}
+
 async function downloadFirmware() {
   const response = await fetch("/api/firmware/app");
   if (!response.ok) {
@@ -357,15 +969,40 @@ convertBtn.addEventListener("click", handleConvert);
 connectBtn.addEventListener("click", connectDevice);
 flashBtn.addEventListener("click", flashFirmware);
 downloadBtn.addEventListener("click", downloadFirmware);
+usbConnectBtn.addEventListener("click", connectUsb);
+usbRefreshBtn.addEventListener("click", () => listDirectory(currentPath));
+usbNewBtn.addEventListener("click", createFolder);
+usbAddBtn.addEventListener("click", () => {
+  convertStatus.textContent = "";
+  hideUploadProgress();
+  if (!usbConnected) {
+    convertTarget.textContent = "Connect USB to upload. Conversion will download instead.";
+  } else {
+    convertTarget.textContent = `Upload target: ${currentPath}`;
+  }
+  convertModal.classList.add("open");
+});
+convertClose.addEventListener("click", () => convertModal.classList.remove("open"));
+convertModal.addEventListener("click", (event) => {
+  if (event.target === convertModal) {
+    convertModal.classList.remove("open");
+  }
+});
 
 imageOptions.style.display = "none";
 bookOptions.style.display = "none";
 imageOptions.classList.add("hidden");
 bookOptions.classList.add("hidden");
 setProgress(0);
+hideUploadProgress();
 if (!navigator.serial) {
   connectBtn.disabled = true;
   flashBtn.disabled = true;
   logFlash("WebSerial not available. Use Chrome/Edge on localhost.");
+  usbConnectBtn.disabled = true;
+  usbRefreshBtn.disabled = true;
+  usbNewBtn.disabled = true;
+  usbAddBtn.disabled = true;
+  logUsb("WebSerial not available. USB file access disabled.");
 }
 loadLatestFirmware();
