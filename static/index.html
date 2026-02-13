@@ -13,12 +13,18 @@
     <img src="/ternreader_logo_4color.svg" alt="TernReader logo" class="logo" />
     <div>
       <h1>TernReader Web Tools</h1>
-      <p>Drag and drop EPUB or images for conversion, then flash the latest app firmware.</p>
+      <p>Manage files, convert EPUBs or images, and flash the latest app firmware.</p>
     </div>
   </header>
 
+  <div class="tabs">
+    <button class="tab-btn active" type="button" data-tab="files">Device Files</button>
+    <button class="tab-btn" type="button" data-tab="flash">Flashing</button>
+  </div>
+
   <main class="grid">
-    <section class="card wide file-manager">
+    <div id="tab-files" class="tab-panel active">
+      <section class="card wide file-manager">
       <div class="file-manager-header">
         <div>
           <h2>Device Files</h2>
@@ -46,9 +52,11 @@
         <summary>USB log</summary>
         <pre id="usb-log" class="log"></pre>
       </details>
-    </section>
+      </section>
+    </div>
 
-    <section class="card wide">
+    <div id="tab-flash" class="tab-panel">
+      <section class="card wide">
       <h2>Flash Latest App Firmware</h2>
       <p>Uses WebSerial. Supported in Chrome and Edge.</p>
       <div class="flash-info">
@@ -77,7 +85,8 @@
         <div id="flash-percent" class="muted">0%</div>
       </div>
       <pre id="flash-log" class="log"></pre>
-    </section>
+      </section>
+    </div>
 
   </main>
 

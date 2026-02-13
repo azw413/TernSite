@@ -34,6 +34,8 @@ const fmBreadcrumbs = document.getElementById("fm-breadcrumbs");
 const fmList = document.getElementById("fm-list");
 const fmEmpty = document.getElementById("fm-empty");
 const usbLog = document.getElementById("usb-log");
+const tabButtons = document.querySelectorAll(".tab-btn");
+const tabPanels = document.querySelectorAll(".tab-panel");
 
 let selectedFile = null;
 let connectedLoader = null;
@@ -58,12 +60,28 @@ const usbStats = {
 };
 let usbConnected = false;
 let usbMaxPayload = 4096;
+let usbRequiresShortNames = false;
 let currentPath = "/";
 let uploadInProgress = false;
 let uploadCancelRequested = false;
 let currentUploadPath = null;
 let uploadStartMs = 0;
 let uploadTotalBytes = 0;
+
+function setActiveTab(tabId) {
+  tabButtons.forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === tabId);
+  });
+  tabPanels.forEach((panel) => {
+    panel.classList.toggle("active", panel.id === `tab-${tabId}`);
+  });
+}
+
+tabButtons.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    setActiveTab(btn.dataset.tab);
+  });
+});
 
 function logFlash(message) {
   flashLog.textContent += `${message}\n`;
@@ -217,12 +235,10 @@ function renderFileList(entries) {
 
     const actionsCell = document.createElement("div");
     actionsCell.className = "file-actions";
-    if (!entry.isDir) {
-      const delBtn = document.createElement("button");
-      delBtn.textContent = "Delete";
-      delBtn.addEventListener("click", () => deleteEntry(entry));
-      actionsCell.appendChild(delBtn);
-    }
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "Delete";
+    delBtn.addEventListener("click", () => deleteEntry(entry));
+    actionsCell.appendChild(delBtn);
 
     row.appendChild(nameCell);
     row.appendChild(sizeCell);
@@ -260,6 +276,9 @@ function toShortName(filename) {
 }
 
 function ensureShortName(filename) {
+  if (!usbRequiresShortNames) {
+    return { name: filename, changed: false };
+  }
   const short = toShortName(filename);
   return {
     name: short,
@@ -829,6 +848,16 @@ async function usbDelete(path) {
   throw new Error("Delete CRC retry failed");
 }
 
+async function usbRmdir(path) {
+  const { payload } = encodePathPayload(path);
+  const reqId = await usbSend(0x15, payload);
+  const frame = await usbWaitForResponse(reqId, 4000);
+  const isErr = (frame.flags & 0x02) !== 0;
+  if (isErr) {
+    throw new Error(decodeError(frame.payload));
+  }
+}
+
 async function usbMkdir(path) {
   const { payload } = encodePathPayload(path);
   const reqId = await usbSend(0x14, payload);
@@ -1009,11 +1038,18 @@ async function listDirectory(path) {
 }
 
 async function deleteEntry(entry) {
-  if (!confirm(`Delete ${entry.name}?`)) return;
+  const promptText = entry.isDir
+    ? `Delete folder ${entry.name} and all contents?`
+    : `Delete ${entry.name}?`;
+  if (!confirm(promptText)) return;
   try {
     const path = joinPath(currentPath, entry.name);
     setFileManagerStatus(`Deleting ${path} ...`);
-    await usbDelete(path);
+    if (entry.isDir) {
+      await usbRmdir(path);
+    } else {
+      await usbDelete(path);
+    }
     await listDirectory(currentPath);
   } catch (err) {
     setFileManagerStatus(`Delete failed: ${err?.message || err}`);
