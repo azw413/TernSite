@@ -9,6 +9,7 @@ const convertTarget = document.getElementById("convert-target");
 const uploadProgress = document.getElementById("upload-progress");
 const uploadPercent = document.getElementById("upload-percent");
 const uploadProgressWrap = document.querySelector(".upload-progress");
+const uploadMetrics = document.getElementById("upload-metrics");
 const imageOptions = document.getElementById("image-options");
 const bookOptions = document.getElementById("book-options");
 const imageOutput = document.getElementById("image-output");
@@ -56,8 +57,13 @@ const usbStats = {
   badVersion: 0,
 };
 let usbConnected = false;
-let usbMaxPayload = 512;
+let usbMaxPayload = 4096;
 let currentPath = "/";
+let uploadInProgress = false;
+let uploadCancelRequested = false;
+let currentUploadPath = null;
+let uploadStartMs = 0;
+let uploadTotalBytes = 0;
 
 function logFlash(message) {
   flashLog.textContent += `${message}\n`;
@@ -85,11 +91,33 @@ function setUploadProgress(percent) {
 function showUploadProgress() {
   uploadProgressWrap.classList.add("visible");
   setUploadProgress(0);
+  uploadMetrics.textContent = "";
 }
 
 function hideUploadProgress() {
   uploadProgressWrap.classList.remove("visible");
   setUploadProgress(0);
+  uploadMetrics.textContent = "";
+}
+
+function formatRate(bytesPerSec) {
+  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return "0.0 KB/s";
+  return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+}
+
+function formatEta(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0:00";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+function updateUploadMetrics(sentBytes) {
+  const elapsedSec = (Date.now() - uploadStartMs) / 1000;
+  const rate = sentBytes / Math.max(elapsedSec, 0.1);
+  const remainingBytes = Math.max(uploadTotalBytes - sentBytes, 0);
+  const eta = remainingBytes / Math.max(rate, 1);
+  uploadMetrics.textContent = `${formatRate(rate)} • ${formatEta(eta)} remaining`;
 }
 
 function setFile(file) {
@@ -224,7 +252,10 @@ function toShortName(filename) {
   const base = parts.join(".");
   const clean = (str) => str.replace(/[^a-zA-Z0-9]/g, "_").toUpperCase();
   const shortBase = clean(base).slice(0, 8) || "FILE";
-  const shortExt = clean(ext).slice(0, 3);
+  let shortExt = clean(ext).slice(0, 3);
+  if (shortExt === "TRB") {
+    shortExt = "TBK";
+  }
   return shortExt ? `${shortBase}.${shortExt}` : shortBase;
 }
 
@@ -268,6 +299,11 @@ function buildBookFormData(file) {
 }
 
 async function handleConvert() {
+  if (uploadInProgress) {
+    uploadCancelRequested = true;
+    convertStatus.textContent = "Canceling upload...";
+    return;
+  }
   if (!selectedFile) {
     convertStatus.textContent = "Select a file first.";
     return;
@@ -311,6 +347,12 @@ async function handleConvert() {
     }
     convertStatus.textContent = `Uploading to ${finalPath} ...`;
     showUploadProgress();
+    uploadInProgress = true;
+    uploadCancelRequested = false;
+    currentUploadPath = finalPath;
+    convertBtn.textContent = "Cancel";
+    uploadStartMs = Date.now();
+    uploadTotalBytes = blob.size;
     try {
       await usbUploadBlob(finalPath, blob, (percent) => setUploadProgress(percent));
       convertStatus.textContent = `Uploaded to ${finalPath}.`;
@@ -318,10 +360,26 @@ async function handleConvert() {
       setFile(null);
       fileInput.value = "";
       await listDirectory(currentPath);
+      convertModal.classList.remove("open");
     } catch (err) {
       hideUploadProgress();
-      convertStatus.textContent = `Upload failed: ${err?.message || err}`;
+      if (err?.message === "Upload canceled") {
+        convertStatus.textContent = "Upload canceled.";
+        if (currentUploadPath) {
+          try {
+            await usbDelete(currentUploadPath);
+          } catch (_) {
+            // Best effort cleanup.
+          }
+        }
+      } else {
+        convertStatus.textContent = `Upload failed: ${err?.message || err}`;
+      }
     }
+    uploadInProgress = false;
+    uploadCancelRequested = false;
+    currentUploadPath = null;
+    convertBtn.textContent = "Convert";
   } else {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -538,7 +596,7 @@ function writeU32(buf, value) {
   buf.push(value & 0xff, (value >> 8) & 0xff, (value >> 16) & 0xff, (value >> 24) & 0xff);
 }
 
-function encodeFrame(cmd, reqId, payload, flags = 0x01) {
+function encodeFrame(cmd, reqId, payload, flags = 0x00) {
   const out = [];
   writeU16(out, 0x5452);
   out.push(0x01);
@@ -672,10 +730,11 @@ function encodePathPayload(path) {
   return { payload, pathBytes };
 }
 
-async function usbWaitForResponse(reqId, timeoutMs = 2000) {
+async function usbWaitForResponse(reqId, timeoutMs = 2000, allowCrcBad = false) {
   return new Promise((resolve, reject) => {
     const handler = (frame) => {
       if (frame.reqId !== reqId) return false;
+      if (frame.crcOk === false && !allowCrcBad) return false;
       const idx = pendingUsbFrames.indexOf(handler);
       if (idx !== -1) pendingUsbFrames.splice(idx, 1);
       resolve(frame);
@@ -755,12 +814,19 @@ async function usbList(path) {
 
 async function usbDelete(path) {
   const { payload } = encodePathPayload(path);
-  const reqId = await usbSend(0x13, payload);
-  const frame = await usbWaitForResponse(reqId, 2000);
-  const isErr = (frame.flags & 0x02) !== 0;
-  if (isErr) {
-    throw new Error(decodeError(frame.payload));
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const reqId = await usbSend(0x13, payload);
+    const frame = await usbWaitForResponse(reqId, 2000);
+    if (frame.crcOk === false) {
+      continue;
+    }
+    const isErr = (frame.flags & 0x02) !== 0;
+    if (isErr) {
+      throw new Error(decodeError(frame.payload));
+    }
+    return;
   }
+  throw new Error("Delete CRC retry failed");
 }
 
 async function usbMkdir(path) {
@@ -773,52 +839,78 @@ async function usbMkdir(path) {
   }
 }
 
-async function usbWriteChunk(path, offset, data) {
-  const { payload } = encodePathPayload(path);
-  const offsetBytes = new Uint8Array(8);
-  const view = new DataView(offsetBytes.buffer);
-  view.setBigUint64(0, BigInt(offset), true);
-  const lenBytes = new Uint8Array(4);
-  new DataView(lenBytes.buffer).setUint32(0, data.length, true);
-  payload.push(...offsetBytes);
-  payload.push(...lenBytes);
-  payload.push(...data);
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const reqId = await usbSend(0x12, payload);
-    const frame = await usbWaitForResponse(reqId, 4000);
-    if (frame.crcOk === false) {
-      continue;
-    }
-    const isErr = (frame.flags & 0x02) !== 0;
-    if (isErr) {
-      throw new Error(decodeError(frame.payload));
-    }
-    const respView = new DataView(frame.payload.buffer, frame.payload.byteOffset, frame.payload.byteLength);
-    return respView.getUint32(0, true);
+async function usbWriteStream(path, buffer, onProgress) {
+  const encoded = new TextEncoder().encode(path);
+  const headerOverhead = 2 + encoded.length + 4 + 8; // path + total + offset
+  const maxChunk = Math.max(512, usbMaxPayload - headerOverhead);
+  if (maxChunk <= 0) {
+    throw new Error("USB payload too small");
   }
-  throw new Error("Write CRC retry failed");
+
+  const reqId = usbReqId++ & 0xffff;
+  let offset = 0;
+  let first = true;
+
+  while (offset < buffer.length) {
+    if (uploadCancelRequested) {
+      throw new Error("Upload canceled");
+    }
+    const remaining = buffer.length - offset;
+    const chunkSize = Math.min(maxChunk, remaining);
+    const chunk = buffer.slice(offset, offset + chunkSize);
+
+    let payload = [];
+    if (first) {
+      payload = encodePathPayload(path).payload;
+      writeU32(payload, buffer.length);
+      const offsetBytes = new Uint8Array(8);
+      const view = new DataView(offsetBytes.buffer);
+      view.setBigUint64(0, BigInt(offset), true);
+      payload.push(...offsetBytes);
+      payload.push(...chunk);
+    } else {
+      const offsetBytes = new Uint8Array(8);
+      const view = new DataView(offsetBytes.buffer);
+      view.setBigUint64(0, BigInt(offset), true);
+      payload.push(...offsetBytes);
+      payload.push(...chunk);
+    }
+
+    const isLast = offset + chunkSize >= buffer.length;
+    const flags = isLast ? 0x04 : 0x08; // EOF or CONT
+    const frame = encodeFrame(0x12, reqId, payload, flags);
+    logUsb(`TX cmd=0x12 req=${reqId} len=${payload.length}`);
+    let ack = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await usbWriter.write(frame);
+      try {
+        ack = await usbWaitForResponse(reqId, 8000, true);
+        break;
+      } catch (err) {
+        if (attempt === 2) throw err;
+        logUsb("Retrying chunk after timeout...");
+      }
+    }
+    const ackErr = (ack.flags & 0x02) !== 0;
+    if (ackErr) {
+      throw new Error(decodeError(ack.payload));
+    }
+    const view = new DataView(ack.payload.buffer, ack.payload.byteOffset, ack.payload.byteLength);
+    const written = ack.payload.length >= 4 ? view.getUint32(0, true) : offset + chunkSize;
+    offset = Math.min(written, buffer.length);
+    if (onProgress) {
+      onProgress((offset / buffer.length) * 100);
+      updateUploadMetrics(offset);
+    }
+
+    first = false;
+  }
+  return true;
 }
 
 async function usbUploadBlob(path, blob, onProgress) {
   const buffer = new Uint8Array(await blob.arrayBuffer());
-  const encoded = new TextEncoder().encode(path);
-  const overhead = 2 + encoded.length + 8 + 4;
-  const maxChunk = Math.max(256, usbMaxPayload - overhead);
-  if (maxChunk <= 0) {
-    throw new Error("USB payload too small");
-  }
-  let offset = 0;
-  while (offset < buffer.length) {
-    const chunk = buffer.slice(offset, offset + maxChunk);
-    const written = await usbWriteChunk(path, offset, chunk);
-    if (written === 0) {
-      throw new Error("Write failed");
-    }
-    offset += written;
-    if (onProgress) {
-      onProgress((offset / buffer.length) * 100);
-    }
-  }
+  await usbWriteStream(path, buffer, onProgress);
 }
 
 async function waitForResponse(reqId, timeoutMs) {
@@ -851,7 +943,7 @@ async function connectUsb() {
   }
   await closeOpenPorts();
   usbPort = await navigator.serial.requestPort();
-  await usbPort.open({ baudRate: 115200 });
+  await usbPort.open({ baudRate: 16777216 });
   usbWriter = usbPort.writable.getWriter();
   usbReader = usbPort.readable.getReader();
   usbBuffer = new Uint8Array(0);
@@ -925,6 +1017,7 @@ async function deleteEntry(entry) {
     await listDirectory(currentPath);
   } catch (err) {
     setFileManagerStatus(`Delete failed: ${err?.message || err}`);
+    await listDirectory(currentPath);
   }
 }
 

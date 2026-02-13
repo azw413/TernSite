@@ -337,6 +337,12 @@ button:disabled {
   display: grid;
 }
 
+.upload-metrics {
+  margin-top: 6px;
+  text-align: center;
+  font-family: "IBM Plex Sans", "Helvetica", sans-serif;
+}
+
 .flash-info {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
