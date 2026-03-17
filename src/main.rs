@@ -209,16 +209,7 @@ fn with_timestamp(name: &str, stamp: u128) -> String {
 fn load_cached_release() -> Option<CachedRelease> {
     let path = cache_dir().join("latest_release.json");
     let data = std::fs::read(path).ok()?;
-    let release: CachedRelease = serde_json::from_slice(&data).ok()?;
-    let is_current_repo = release
-        .assets
-        .iter()
-        .all(|asset| asset.browser_download_url.contains("github.com/azw413/TernOS/"));
-    if is_current_repo {
-        Some(release)
-    } else {
-        None
-    }
+    serde_json::from_slice(&data).ok()
 }
 
 fn save_cached_release(release: &CachedRelease) {
@@ -325,7 +316,7 @@ async fn fetch_latest_release() -> Result<GithubRelease, Status> {
 
     let client = reqwest::Client::new();
     let response = client
-        .get("https://api.github.com/repos/azw413/TernOS/releases/latest")
+        .get("https://api.github.com/repos/azw413/TernReader/releases/latest")
         .header("User-Agent", "tern-site")
         .send()
         .await
@@ -348,7 +339,7 @@ async fn fetch_latest_release() -> Result<GithubRelease, Status> {
 #[get("/api/info")]
 fn info() -> Json<InfoResponse> {
     Json(InfoResponse {
-        name: "TernOS Web Tools",
+        name: "TernReader Web Tools",
         version: "0.1.0",
         device: "Xteink X4 (ESP32-C3)",
         firmware_images: &["application", "full-merged"],
