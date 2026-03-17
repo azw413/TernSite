@@ -144,10 +144,12 @@ function setFile(file) {
 
   const epub = file && isEpub(file);
   const image = file && isImage(file);
+  const install = file && isInstallFile(file);
   imageOptions.style.display = image ? "block" : "none";
   bookOptions.style.display = epub ? "block" : "none";
   imageOptions.classList.toggle("hidden", !image);
   bookOptions.classList.toggle("hidden", !epub);
+  convertBtn.textContent = install ? "Upload" : "Convert";
 
   if (file) {
     if (image) {
@@ -256,6 +258,11 @@ function isEpub(file) {
   return file.name.toLowerCase().endsWith(".epub");
 }
 
+function isInstallFile(file) {
+  const name = file.name.toLowerCase();
+  return name.endsWith(".prc") || name.endsWith(".pdb");
+}
+
 function replaceExtension(filename, newExt) {
   const idx = filename.lastIndexOf(".");
   if (idx === -1) return filename + newExt;
@@ -328,8 +335,60 @@ async function handleConvert() {
     return;
   }
 
-  if (!isEpub(selectedFile) && !isImage(selectedFile)) {
+  if (!isEpub(selectedFile) && !isImage(selectedFile) && !isInstallFile(selectedFile)) {
     convertStatus.textContent = "Unsupported file type.";
+    return;
+  }
+
+  if (isInstallFile(selectedFile)) {
+    if (!usbConnected) {
+      convertStatus.textContent = "Connect USB to upload PRC or PDB files.";
+      return;
+    }
+
+    const short = ensureShortName(selectedFile.name);
+    const finalName = short.name;
+    const finalPath = joinPath(currentPath, finalName);
+    if (short.changed) {
+      convertStatus.textContent = `Device requires 8.3 names. Using ${finalName}.`;
+    }
+    convertStatus.textContent = `Uploading to ${finalPath} ...`;
+    showUploadProgress();
+    uploadInProgress = true;
+    uploadCancelRequested = false;
+    currentUploadPath = finalPath;
+    convertBtn.textContent = "Cancel";
+    uploadStartMs = Date.now();
+    uploadTotalBytes = selectedFile.size;
+
+    try {
+      await usbUploadBlob(finalPath, selectedFile, (percent) => setUploadProgress(percent));
+      convertStatus.textContent = `Uploaded to ${finalPath}.`;
+      hideUploadProgress();
+      setFile(null);
+      fileInput.value = "";
+      await listDirectory(currentPath);
+      convertModal.classList.remove("open");
+    } catch (err) {
+      hideUploadProgress();
+      if (err?.message === "Upload canceled") {
+        convertStatus.textContent = "Upload canceled.";
+        if (currentUploadPath) {
+          try {
+            await usbDelete(currentUploadPath);
+          } catch (_) {
+            // Best effort cleanup.
+          }
+        }
+      } else {
+        convertStatus.textContent = `Upload failed: ${err?.message || err}`;
+      }
+    }
+
+    uploadInProgress = false;
+    uploadCancelRequested = false;
+    currentUploadPath = null;
+    convertBtn.textContent = "Convert";
     return;
   }
 
@@ -1122,6 +1181,7 @@ imageOptions.style.display = "none";
 bookOptions.style.display = "none";
 imageOptions.classList.add("hidden");
 bookOptions.classList.add("hidden");
+convertBtn.textContent = "Convert";
 setProgress(0);
 hideUploadProgress();
 if (!navigator.serial) {
