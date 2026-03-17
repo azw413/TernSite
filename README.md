@@ -1,10 +1,10 @@
 # TernSite
 
-TernSite is a Rocket-based web app for TernReader:
+TernSite is a Rocket-based web app for TernOS:
 - Convert EPUB + image files for the Xteink X4.
 - Flash the latest **application** firmware via WebSerial.
 
-Planned host: `https://ternreader.org`
+Planned host: `https://ternos.org`
 
 ## What’s Implemented
 - Drag-and-drop conversion for `.epub`, `.png`, `.jpg`, `.jpeg`.
@@ -54,7 +54,7 @@ Open `http://localhost:8000` in Chrome or Edge (WebSerial required for flashing)
 
 ### Firmware Source
 - If a file matching `cache/tern-fw-*.bin` exists, it is preferred.
-- Otherwise it falls back to GitHub releases (`azw413/TernReader`).
+- Otherwise it falls back to GitHub releases (`azw413/TernOS`).
 
 ## API Endpoints
 - `GET /api/info`

@@ -3,6 +3,8 @@ debug/
 target/
 images/
 sdcard/
+cache/
+temp/
 
 # Editor configuration
 .vscode/

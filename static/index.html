@@ -3,32 +3,94 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TernReader Tools</title>
+  <title>TernOS Tools</title>
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <header class="hero">
-    <img src="/ternreader_logo_4color.svg" alt="TernReader logo" class="logo" />
+    <img src="/ternreader_logo_4color.svg" alt="TernOS logo" class="logo" />
     <div>
-      <h1>TernReader Web Tools</h1>
-      <p>Manage files, convert EPUBs or images, and flash the latest app firmware.</p>
+      <h1>TernOS Web Tools</h1>
+      <p>Manage files, convert EPUBs or images, install apps and flash the latest app firmware.</p>
     </div>
   </header>
 
   <div class="tabs">
-    <button class="tab-btn active" type="button" data-tab="files">Device Files</button>
+    <button class="tab-btn active" type="button" data-tab="intro">Introduction</button>
+    <button class="tab-btn" type="button" data-tab="files">Device Files</button>
     <button class="tab-btn" type="button" data-tab="flash">Flashing</button>
   </div>
 
   <main class="grid">
-    <div id="tab-files" class="tab-panel active">
+    <div id="tab-intro" class="tab-panel active">
+      <section class="card wide intro-card">
+        <div class="intro-grid">
+          <div class="workflow-showcase">
+            <div class="screen-reel" aria-label="Animated TernOS screenshots">
+              <img src="/screenshots/recents.png" alt="TernOS recents screen" class="screen-shot shot-1" />
+              <img src="/screenshots/book.png" alt="TernOS books screen" class="screen-shot shot-2" />
+              <img src="/screenshots/book-menu.png" alt="TernOS book menu" class="screen-shot shot-3" />
+              <img src="/screenshots/book-content.png" alt="TernOS book content view" class="screen-shot shot-4" />
+              <img src="/screenshots/recents.png" alt="TernOS recents screen" class="screen-shot shot-5" />
+              <img src="/screenshots/yoda.png" alt="TernOS Yoda application" class="screen-shot shot-6" />
+            </div>
+          </div>
+          <div>
+            <p class="eyebrow">What TernOS Is</p>
+            <h2>TernOS is a PalmOS-inspired operating system for modern e-ink microcontroller devices.</h2>
+            <p class="intro-lead">
+              It targets hardware such as the XTEink X4 and M5Paper, provides a shared runtime and UI layer,
+              and will be able to run native Rust applications as well a growing set of classic Palm applications.
+            </p>
+            <div class="intro-note">
+              <h3>This site focuses on the XTEink X4 workflow</h3>
+              <p>
+                Use it to flash the latest application firmware, convert EPUB books into Tern book files,
+                and convert images into compact display formats that render well on-device.
+              </p>
+              <p>To install Palm apps, copy the prc / pdb files to <code>/install</code> on the sdcard.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="intro-columns">
+          <section>
+            <h3>Current focus</h3>
+            <p>
+              TernOS is moving beyond single-purpose reader firmware toward a general system with hardware services,
+              UI primitives, storage, databases, launcher apps, and a Palm compatibility layer. On desktop and X4, the
+              reader and image-viewer path is already working well and some basic PalmOS apps, like Yoda, run.
+            </p>
+          </section>
+          <section>
+            <h3>What works today</h3>
+            <ul class="intro-list">
+              <li>Launcher categories for apps, books, images, and recents.</li>
+              <li>EPUB conversion into compact `.trbk` reader files with selectable fonts, image support and ToC.</li>
+              <li>Image conversion into `.tri` and `.trimg` formats for e-ink screens.</li>
+              <li>Application firmware flashing for the ESP32-C3 based XTEink X4.</li>
+              <li>Some simple Palm apps like <a href="https://palmdb.net/app/yoda">Yoda</a></li>
+            </ul>
+          </section>
+          <section>
+            <h3>Why this web app exists</h3>
+            <p>
+              The project needs a simple path for end users: flash firmware, prepare content, and manage files
+              without installing separate desktop tools. The tabs here cover that path directly.
+            </p>
+          </section>
+        </div>
+      </section>
+    </div>
+
+    <div id="tab-files" class="tab-panel">
       <section class="card wide file-manager">
       <div class="file-manager-header">
         <div>
           <h2>Device Files</h2>
-          <p class="muted">Browse, delete, and add converted files directly on your TernReader.</p>
+          <p class="muted">Browse, delete, and add converted files directly on your TernOS device.</p>
         </div>
         <div class="file-manager-actions">
           <button id="fm-connect-btn" type="button">Connect USB</button>
@@ -92,7 +154,7 @@
 
   <footer>
     <p>API: <code>/api/convert/image</code>, <code>/api/convert/book</code>, <code>/api/firmware/latest</code></p>
-    <p>GitHub: <a href="https://github.com/azw413/TernReader" target="_blank" rel="noreferrer">https://github.com/azw413/TernReader</a></p>
+    <p>GitHub: <a href="https://github.com/azw413/TernOS" target="_blank" rel="noreferrer">https://github.com/azw413/TernOS</a></p>
   </footer>
 
   <div id="convert-modal" class="modal">

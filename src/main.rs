@@ -160,6 +160,10 @@ fn cache_dir() -> std::path::PathBuf {
     project_root().join("cache")
 }
 
+fn temp_dir() -> std::path::PathBuf {
+    project_root().join("temp")
+}
+
 fn fonts_dir() -> std::path::PathBuf {
     project_root().join("fonts")
 }
@@ -175,10 +179,46 @@ fn now_epoch() -> u64 {
         .as_secs()
 }
 
+fn now_epoch_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::from_secs(0))
+        .as_millis()
+}
+
+fn ensure_temp_dir() -> Result<(), Status> {
+    if std::fs::create_dir_all(temp_dir()).is_err() {
+        return Err(Status::InternalServerError);
+    }
+    Ok(())
+}
+
+fn with_timestamp(name: &str, stamp: u128) -> String {
+    let name = name.trim();
+    if name.is_empty() {
+        return format!("file-{}", stamp);
+    }
+    match name.rsplit_once('.') {
+        Some((base, ext)) if !base.is_empty() && !ext.is_empty() => {
+            format!("{}-{}.{}", base, stamp, ext)
+        }
+        _ => format!("{}-{}", name, stamp),
+    }
+}
+
 fn load_cached_release() -> Option<CachedRelease> {
     let path = cache_dir().join("latest_release.json");
     let data = std::fs::read(path).ok()?;
-    serde_json::from_slice(&data).ok()
+    let release: CachedRelease = serde_json::from_slice(&data).ok()?;
+    let is_current_repo = release
+        .assets
+        .iter()
+        .all(|asset| asset.browser_download_url.contains("github.com/azw413/TernOS/"));
+    if is_current_repo {
+        Some(release)
+    } else {
+        None
+    }
 }
 
 fn save_cached_release(release: &CachedRelease) {
@@ -285,7 +325,7 @@ async fn fetch_latest_release() -> Result<GithubRelease, Status> {
 
     let client = reqwest::Client::new();
     let response = client
-        .get("https://api.github.com/repos/azw413/TernReader/releases/latest")
+        .get("https://api.github.com/repos/azw413/TernOS/releases/latest")
         .header("User-Agent", "tern-site")
         .send()
         .await
@@ -308,7 +348,7 @@ async fn fetch_latest_release() -> Result<GithubRelease, Status> {
 #[get("/api/info")]
 fn info() -> Json<InfoResponse> {
     Json(InfoResponse {
-        name: "TernReader Web Tools",
+        name: "TernOS Web Tools",
         version: "0.1.0",
         device: "Xteink X4 (ESP32-C3)",
         firmware_images: &["application", "full-merged"],
@@ -421,15 +461,17 @@ async fn convert_image(form: rocket::form::Form<ImageForm<'_>>) -> Result<Binary
 
     let trimg = convert_bytes(&bytes, options).map_err(|_| Status::BadRequest)?;
 
-    let tmp = NamedTempFile::new().map_err(|_| Status::InternalServerError)?;
-    write_trimg(tmp.path(), &trimg).map_err(|_| Status::InternalServerError)?;
-    let data = std::fs::read(tmp.path()).map_err(|_| Status::InternalServerError)?;
-
+    ensure_temp_dir()?;
+    let stamp = now_epoch_ms();
     let filename = form
         .output_name
         .as_deref()
         .map(|name| sanitize_filename(name, "converted.tri"))
         .unwrap_or_else(|| "converted.tri".to_string());
+    let stamped = with_timestamp(&filename, stamp);
+    let out_path = temp_dir().join(&stamped);
+    write_trimg(&out_path, &trimg).map_err(|_| Status::InternalServerError)?;
+    let data = std::fs::read(&out_path).map_err(|_| Status::InternalServerError)?;
 
     Ok(BinaryFile {
         data,
@@ -454,25 +496,28 @@ async fn convert_book(form: rocket::form::Form<BookForm<'_>>) -> Result<BinaryFi
         .await
         .map_err(|_| Status::BadRequest)?;
 
-    let epub_tmp = NamedTempFile::new().map_err(|_| Status::InternalServerError)?;
-    std::fs::write(epub_tmp.path(), &epub_bytes).map_err(|_| Status::InternalServerError)?;
+    ensure_temp_dir()?;
+    let stamp = now_epoch_ms();
+    let epub_name = with_timestamp("upload.epub", stamp);
+    let epub_path = temp_dir().join(&epub_name);
+    std::fs::write(&epub_path, &epub_bytes).map_err(|_| Status::InternalServerError)?;
 
     let sizes = parse_sizes(&form.sizes);
     let sizes = if sizes.is_empty() { vec![18] } else { sizes };
 
     let font_paths = resolve_font_paths(&form.font).ok_or(Status::BadRequest)?;
 
-    let out_tmp = NamedTempFile::new().map_err(|_| Status::InternalServerError)?;
-    convert_epub_to_trbk_multi(epub_tmp.path(), out_tmp.path(), &sizes, &font_paths)
-        .map_err(|_| Status::InternalServerError)?;
-
-    let data = std::fs::read(out_tmp.path()).map_err(|_| Status::InternalServerError)?;
-
     let filename = form
         .output_name
         .as_deref()
         .map(|name| sanitize_filename(name, "converted.trbk"))
         .unwrap_or_else(|| "converted.trbk".to_string());
+    let stamped = with_timestamp(&filename, stamp);
+    let out_path = temp_dir().join(&stamped);
+    convert_epub_to_trbk_multi(&epub_path, &out_path, &sizes, &font_paths)
+        .map_err(|_| Status::InternalServerError)?;
+
+    let data = std::fs::read(&out_path).map_err(|_| Status::InternalServerError)?;
 
     Ok(BinaryFile {
         data,

@@ -85,6 +85,172 @@ h1 {
   grid-column: 1 / -1;
 }
 
+.intro-card {
+  background:
+    radial-gradient(circle at top right, rgba(30, 111, 92, 0.08), transparent 32%),
+    linear-gradient(180deg, #fffdf8, #fffaf1);
+}
+
+.intro-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.72fr) minmax(0, 1.68fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.workflow-showcase {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.8rem;
+  font-family: "IBM Plex Sans", "Helvetica", sans-serif;
+}
+
+.intro-lead {
+  font-size: 1.05rem;
+  line-height: 1.65;
+  max-width: 62ch;
+}
+
+.intro-note {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.9);
+  margin-top: 18px;
+}
+
+.screen-reel {
+  position: relative;
+  width: 240px;
+  height: 400px;
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(31, 31, 31, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(246, 243, 237, 0.95)),
+    #ece6da;
+  box-shadow: 0 16px 32px rgba(31, 31, 31, 0.12);
+}
+
+.screen-reel::before {
+  content: "XTEink X4";
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 2;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--accent);
+  font-family: "IBM Plex Sans", "Helvetica", sans-serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.screen-shot {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  animation: screen-reel-cycle 24s infinite;
+}
+
+.shot-1 {
+  animation-delay: 0s;
+}
+
+.shot-2 {
+  animation-delay: 4s;
+}
+
+.shot-3 {
+  animation-delay: 8s;
+}
+
+.shot-4 {
+  animation-delay: 12s;
+}
+
+.shot-5 {
+  animation-delay: 16s;
+}
+
+.shot-6 {
+  animation-delay: 20s;
+}
+
+@keyframes screen-reel-cycle {
+  0% {
+    opacity: 0;
+    transform: scale(1.02);
+  }
+
+  4% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  16% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  20% {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen-shot {
+    animation: none;
+  }
+
+  .shot-1 {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.intro-note h3,
+.intro-columns h3 {
+  margin-top: 0;
+}
+
+.intro-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 22px;
+}
+
+.intro-columns section {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.intro-list {
+  margin: 0;
+  padding-left: 20px;
+  line-height: 1.6;
+}
+
 label {
   display: grid;
   gap: 8px;
@@ -429,6 +595,20 @@ footer {
 @media (max-width: 720px) {
   .hero {
     grid-template-columns: 1fr;
+  }
+
+  .intro-grid,
+  .intro-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-showcase {
+    grid-template-columns: 1fr;
+  }
+
+  .screen-reel {
+    width: min(240px, 100%);
+    margin: 0 auto;
   }
 
   .file-row {
